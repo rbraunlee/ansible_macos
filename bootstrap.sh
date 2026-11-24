@@ -8,6 +8,10 @@
 #        ./bootstrap.sh --tags dock
 #
 # Works from any directory: it changes to the directory that holds this script.
+#
+# On a terminal it asks for your sudo password once, checks it with sudo, and
+# hands it to the playbook as ansible_become_password, which Homebrew casks
+# that need root use. Without a terminal it falls back to --ask-become-pass.
 
 set -euo pipefail
 
@@ -30,7 +34,52 @@ die() {
     exit 1
 }
 
+# The sudo password, asked for once. It stays in this shell (never exported,
+# never on a command line, never on disk) and only ansible-playbook gets it,
+# through its own environment (see step 5).
+BECOME_PASS=""
+SUDO_TRIES=3
+
+# Feed BECOME_PASS to `sudo -v` on stdin. That checks it and refreshes the
+# sudo timestamp, so the Homebrew installer does not ask again. sudo's error
+# messages go to stdout, for the caller to show.
+sudo_validate() {
+    printf '%s\n' "$BECOME_PASS" | sudo -S -p '' -v 2>&1
+}
+
+ask_sudo_password() {
+    local attempt sudo_err="" nl=$'\n'
+    # Forget any cached sudo timestamp, so the check below tests the password.
+    sudo -k
+    for (( attempt = 1; attempt <= SUDO_TRIES; attempt++ )); do
+        BECOME_PASS=""
+        if ! IFS= read -r -s -p "[SUDO] Password for $(id -un) (for sudo and Homebrew casks): " BECOME_PASS; then
+            echo >&2
+            die "No password entered."
+        fi
+        echo >&2
+        if [[ -z "$BECOME_PASS" ]]; then
+            echo "[SUDO] The password is empty." >&2
+        elif sudo_err="$(sudo_validate)"; then
+            echo "[DONE] sudo password accepted."
+            return 0
+        else
+            echo "[SUDO] sudo rejected the password (attempt $attempt of $SUDO_TRIES)." >&2
+        fi
+    done
+    BECOME_PASS=""
+    die "No valid sudo password after $SUDO_TRIES attempts.${sudo_err:+ Last sudo message: ${sudo_err##*"$nl"}}"
+}
+
 echo "--- Starting macOS Bootstrap ---"
+
+if [[ -t 0 ]]; then
+    ask_sudo_password
+else
+    echo "[WARN] No terminal on stdin, so the sudo password is not asked for up front."
+    echo "       ansible-playbook will ask for it (--ask-become-pass), but Homebrew casks"
+    echo "       will not get it and casks that need sudo may fail."
+fi
 
 # 1. Xcode Command Line Tools
 if ! xcode-select -p &> /dev/null; then
@@ -74,6 +123,12 @@ if BREW_BIN="$(find_brew)"; then
     echo "[SKIP] Homebrew already installed at $BREW_BIN."
 else
     echo "[INSTALL] Installing Homebrew..."
+    # Refresh the sudo timestamp (it lapses during a long Xcode install) so the
+    # installer's own sudo call does not prompt. Failure here is harmless: the
+    # installer then just asks itself.
+    if [[ -n "$BECOME_PASS" ]]; then
+        sudo_validate > /dev/null || true
+    fi
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     BREW_BIN="$(find_brew)" || die "Homebrew installation finished but no brew binary was found."
 fi
@@ -107,6 +162,22 @@ ansible-galaxy collection install -r requirements.yml
 # 5. Playbook
 echo "[RUN] Executing Ansible Playbook..."
 # ${1+"$@"}: bash 3.2 (macOS /bin/bash) treats an empty "$@" as unbound under set -u.
-ansible-playbook main.yml --ask-become-pass ${1+"$@"}
+# Extra args come last, so a user's own -e or -K still wins.
+if [[ -n "$BECOME_PASS" ]]; then
+    # -K would not help here: ansible-core keeps that value away from tasks,
+    # so homebrew_cask's sudo_password could never see it. Instead the password
+    # goes into ansible-playbook's environment only (the VAR=value prefix does
+    # not export it from this shell), and ansible_become_password reads it
+    # with the env lookup. It is not on any command line and not on disk. A
+    # lookup result is not templated again, so a password containing "{{" is
+    # safe.
+    BOOTSTRAP_BECOME_PASS="$BECOME_PASS" ansible-playbook main.yml \
+        -e '{"ansible_become_password": "{{ lookup(\"ansible.builtin.env\", \"BOOTSTRAP_BECOME_PASS\") }}"}' \
+        ${1+"$@"}
+else
+    ansible-playbook main.yml --ask-become-pass ${1+"$@"}
+fi
+BECOME_PASS=""
+unset BECOME_PASS
 
 echo "--- Bootstrap Complete ---"
