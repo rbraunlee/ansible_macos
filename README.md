@@ -38,7 +38,7 @@ open -e ~/ansible_macos/vars/local.yml   # fill in your name, email, GitHub user
 5. Install the Galaxy collections from `requirements.yml`.
 6. Run `ansible-playbook main.yml`, passing the sudo password without putting it on a command line or on disk.
 
-Extra arguments are passed through to `ansible-playbook`, so a safe first run is:
+Extra arguments are passed through to `ansible-playbook`, so a dry run of the playbook is (the prerequisites are still installed, and `~/.zprofile` is still updated):
 
 ```bash
 ./bootstrap.sh --check
@@ -65,7 +65,7 @@ Run this way, casks that need sudo don't get the password: Ansible keeps the `-K
 | `inventory/host.ini` | Inventory: `localhost` over a local connection, using the Python that runs Ansible. |
 | `ansible.cfg` | Points Ansible at the inventory. |
 | `requirements.yml` | Galaxy collections (`community.general`). |
-| `.yamllint`, `.ansible-lint`, `.github/workflows/lint.yml` | Lint configuration and the CI workflow that runs yamllint, ansible-lint, a syntax check and shellcheck on every push and pull request. |
+| `.yamllint`, `.ansible-lint`, `.github/workflows/lint.yml` | Lint configuration and the CI workflow that runs yamllint, ansible-lint, a syntax check and shellcheck on pushes to `main` and on every pull request. |
 
 ## Configuration
 
@@ -114,7 +114,7 @@ The playbook is designed to be re-run, and a second run should report no changes
 
 ## Known limitations
 
-- Not yet verified end to end on a real Mac. Each merged PR lists what to check there.
+- Not yet verified end to end on a real Mac. PRs #17, #20 and #23 list what to check there.
 - If `XDG_DATA_HOME` is set, the Zap installer puts Zap under it, but the playbook checks `~/.local/share/zap`, so it would reinstall on every run.
 - If Touch ID for sudo is enabled, `sudo -v` in `bootstrap.sh` may show a Touch ID prompt instead of reading the typed password.
 

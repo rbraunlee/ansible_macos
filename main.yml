@@ -40,14 +40,14 @@
           identity (user.name/user.email) is skipped. Set them in vars/local.yml (see vars/local.example.yml).
       when:
         - features.configure_git
-        - (user.name | default('') | length == 0) or (user.email | default('') | length == 0)
+        - (user.name | default('', true) | length == 0) or (user.email | default('', true) | length == 0)
 
     - name: Warn when no dotfiles repo is configured
       ansible.builtin.debug:
         msg: >-
           dotfiles.repo is empty, so cloning and stowing dotfiles is skipped.
           Set it in vars/local.yml (see vars/local.example.yml).
-      when: dotfiles.repo | default('') | length == 0
+      when: dotfiles.repo | default('', true) | length == 0
 
   tasks:
     - name: Ensure Homebrew is installed
@@ -133,8 +133,8 @@
         value: "{{ user.name }}"
       when:
         - features.configure_git
-        - user.name | default('') | length > 0
-        - user.email | default('') | length > 0
+        - user.name | default('', true) | length > 0
+        - user.email | default('', true) | length > 0
 
     - name: Configure Git Global Email
       community.general.git_config:
@@ -143,8 +143,8 @@
         value: "{{ user.email }}"
       when:
         - features.configure_git
-        - user.name | default('') | length > 0
-        - user.email | default('') | length > 0
+        - user.name | default('', true) | length > 0
+        - user.email | default('', true) | length > 0
 
     - name: Configure Git GitHub username
       community.general.git_config:
@@ -153,7 +153,7 @@
         value: "{{ user.github_username }}"
       when:
         - features.configure_git
-        - user.github_username | default('') | length > 0
+        - user.github_username | default('', true) | length > 0
 
     - name: Ensure .config directory exists
       ansible.builtin.file:
@@ -162,7 +162,7 @@
         mode: '0755'
 
     - name: Clone and stow dotfiles
-      when: dotfiles.repo | default('') | length > 0
+      when: dotfiles.repo | default('', true) | length > 0
       block:
         # Clone only when missing. Stowed files are edited in place, so the clone is
         # often dirty or ahead of the remote, and an update would then fail. (Without
