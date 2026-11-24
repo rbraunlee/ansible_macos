@@ -3,6 +3,39 @@
   hosts: localhost
   connection: local
 
+  pre_tasks:
+    - name: Check for untracked local overrides
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/vars/local.yml"
+      register: local_vars_file
+
+    - name: Load local overrides from vars/local.yml
+      ansible.builtin.include_vars:
+        file: "{{ local_vars_file.stat.path }}"
+        name: local_vars
+      when: local_vars_file.stat.exists
+
+    # Each top-level key in vars/local.yml overrides the group_vars value.
+    # Dicts are merged recursively, so local.yml only needs the keys it changes.
+    - name: Apply local overrides on top of group_vars
+      ansible.builtin.set_fact:
+        "{{ item.key }}": >-
+          {{ lookup('ansible.builtin.vars', item.key, default={})
+             | ansible.builtin.combine(item.value, recursive=True)
+             if item.value is mapping else item.value }}
+      loop: "{{ local_vars | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Warn when Git identity is not configured
+      ansible.builtin.debug:
+        msg: >-
+          features.configure_git is true but user.name or user.email is empty, so Git
+          configuration is skipped. Set them in vars/local.yml (see vars/local.example.yml).
+      when:
+        - features.configure_git
+        - (user.name | default('') | length == 0) or (user.email | default('') | length == 0)
+
   tasks:
     - name: Ensure Homebrew is installed
       ansible.builtin.stat:
@@ -44,14 +77,29 @@
         name: user.name
         scope: global
         value: "{{ user.name }}"
-      when: features.configure_git
+      when:
+        - features.configure_git
+        - user.name | default('') | length > 0
+        - user.email | default('') | length > 0
 
     - name: Configure Git Global Email
       community.general.git_config:
         name: user.email
         scope: global
         value: "{{ user.email }}"
-      when: features.configure_git
+      when:
+        - features.configure_git
+        - user.name | default('') | length > 0
+        - user.email | default('') | length > 0
+
+    - name: Configure Git GitHub username
+      community.general.git_config:
+        name: github.user
+        scope: global
+        value: "{{ user.github_username }}"
+      when:
+        - features.configure_git
+        - user.github_username | default('') | length > 0
 
     - name: Clone dotfiles repository
       ansible.builtin.git:

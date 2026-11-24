@@ -1,7 +1,10 @@
+---
+# Generic defaults. Put personal values (name, email, dotfiles repo, ...) in the
+# untracked vars/local.yml; see vars/local.example.yml.
 user:
-  name: Rudolf Braun-Lee
-  email: braun.ru@outlook.de
-  github_username: braunrudolf
+  name: ""
+  email: ""
+  github_username: ""
 
 brew_bin: "/opt/homebrew/bin/brew"
 
