@@ -28,6 +28,7 @@ cd -- "$SCRIPT_DIR"
 # How long to wait for the Xcode CLT installer when there is no terminal to
 # prompt on (seconds).
 XCODE_CLT_TIMEOUT="${XCODE_CLT_TIMEOUT:-1800}"
+[[ "$XCODE_CLT_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "[ERROR] XCODE_CLT_TIMEOUT must be a number of seconds." >&2; exit 1; }
 
 die() {
     echo "[ERROR] $*" >&2
@@ -74,6 +75,8 @@ ask_sudo_password() {
 echo "--- Starting macOS Bootstrap ---"
 
 if [[ -t 0 ]]; then
+    # bash 3.2 leaves echo off if the silent read below is interrupted (Ctrl-C).
+    trap 'stty echo 2> /dev/null || true' EXIT
     ask_sudo_password
 else
     echo "[WARN] No terminal on stdin, so the sudo password is not asked for up front."
@@ -89,7 +92,7 @@ if ! xcode-select -p &> /dev/null; then
 
     if [[ -t 0 ]]; then
         echo "[WAIT] Finish the Apple installation dialog."
-        read -r -p "       Press Enter once the installer has finished... "
+        read -r -p "       Press Enter once the installer has finished... " || echo
     else
         echo "[WAIT] Waiting up to ${XCODE_CLT_TIMEOUT}s for the Apple installation dialog to finish..."
         waited=0
@@ -161,8 +164,9 @@ ansible-galaxy collection install -r requirements.yml
 
 # 5. Playbook
 echo "[RUN] Executing Ansible Playbook..."
-# ${1+"$@"}: bash 3.2 (macOS /bin/bash) treats an empty "$@" as unbound under set -u.
-# Extra args come last, so a user's own -e or -K still wins.
+# ${1+"$@"}: defensive idiom for forwarding no args at all under set -u on old shells.
+# Extra args come last, so a user's own -e still wins. -K isn't needed when the
+# password was asked above: it would prompt again and be overridden.
 if [[ -n "$BECOME_PASS" ]]; then
     # -K would not help here: ansible-core keeps that value away from tasks,
     # so homebrew_cask's sudo_password could never see it. Instead the password
