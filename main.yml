@@ -54,8 +54,9 @@
       when: features.configure_git
 
     # Clone only when missing. Stowed files are edited in place, so the clone is
-    # often dirty or ahead of the remote. Updating would then fail, or drop local
-    # commits through the module's `git reset --hard`. Run `git pull` yourself.
+    # often dirty or ahead of the remote, and an update would then fail. (Without
+    # a pinned `version`, the module would even `reset --hard` and drop local
+    # commits.) Run `git pull` yourself.
     - name: Clone dotfiles repository
       ansible.builtin.git:
         repo: "{{ dotfiles.repo }}"
@@ -80,6 +81,8 @@
 
     # -S rather than -R: packages that are already stowed print nothing and stay
     # "ok". With -v, stow logs each action to stderr as "LINK: ..." or "UNLINK: ...".
+    # Trade-off: -S does not remove links to files deleted from a package; run
+    # `stow -R -d <dotfiles>/<subdir> -t ~ <pkg>` by hand for that.
     - name: Symlink dotfiles using Stow
       ansible.builtin.command:
         argv:
