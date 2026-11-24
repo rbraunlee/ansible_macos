@@ -29,7 +29,8 @@
           {{ lookup('ansible.builtin.vars', item.key, default={})
              | ansible.builtin.combine(item.value, recursive=True)
              if item.value is mapping else item.value }}
-      loop: "{{ local_vars | default({}) | dict2items }}"
+      # Keys left empty at the top level (e.g. a bare `dotfiles:`) are ignored instead of wiping the default.
+      loop: "{{ local_vars | default({}) | dict2items | rejectattr('value', 'none') }}"
       loop_control:
         label: "{{ item.key }}"
 
