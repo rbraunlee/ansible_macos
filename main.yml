@@ -43,23 +43,35 @@
         path: "{{ brew_bin }}"
       register: brew_check
 
-    - name: Install Homebrew if missing
-      ansible.builtin.shell: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-      when: not brew_check.stat.exists
+    # bootstrap.sh installs Homebrew from a real terminal, where the installer can prompt for sudo.
+    # Under Ansible there is no TTY, so the installer would need passwordless sudo: fail early instead.
+    - name: Fail early if Homebrew is missing
+      ansible.builtin.assert:
+        that: brew_check.stat.exists
+        fail_msg: >-
+          Homebrew was not found at {{ brew_bin }} (architecture: {{ ansible_facts['architecture'] }}).
+          Run ./bootstrap.sh first: it installs Homebrew and Ansible, then runs this playbook.
+        quiet: true
 
     - name: Install Homebrew formulae
       community.general.homebrew:
         name: "{{ setup_brew.formulae }}"
         state: present
-        update_homebrew: yes
+        path: "{{ brew_bin | dirname }}"
+        update_homebrew: "{{ update_homebrew }}"
       environment:
-        PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['PATH'] }}"
+        PATH: "{{ brew_bin | dirname }}:{{ ansible_facts['env']['PATH'] }}"
 
+    # Casks that ship .pkg installers run sudo inside brew. The module hands sudo_password to sudo
+    # through SUDO_ASKPASS and masks it in output (no_log is set in the module's own argspec).
     - name: Install Homebrew casks
       community.general.homebrew_cask:
         name: "{{ setup_brew.cask }}"
         state: present
-        install_options: "no-quarantine"
+        path: "{{ brew_bin | dirname }}"
+        sudo_password: "{{ ansible_become_password | default(ansible_become_pass | default(omit)) }}"
+      environment:
+        PATH: "{{ brew_bin | dirname }}:{{ ansible_facts['env']['PATH'] }}"
 
     - name: Configure MacOS Dock
       community.general.osx_defaults:
