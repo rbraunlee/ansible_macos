@@ -1,0 +1,11 @@
+---
+# Ansible Galaxy collections used by main.yml.
+# Install with: ansible-galaxy collection install -r requirements.yml
+#
+# community.general provides homebrew, homebrew_cask (incl. sudo_password),
+# osx_defaults (incl. check_type, added in 8.6.0) and git_config. 10.0.0 is a
+# floor well above every option main.yml uses while still allowing current
+# releases.
+collections:
+  - name: community.general
+    version: ">=10.0.0"
