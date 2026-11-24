@@ -17,6 +17,7 @@
 
     # Each top-level key in vars/local.yml overrides the group_vars value.
     # Dicts are merged recursively, so local.yml only needs the keys it changes.
+    # These are set_facts, so they also win over task/block-level `vars:` for the same keys.
     - name: Apply local overrides on top of group_vars
       ansible.builtin.set_fact:
         "{{ item.key }}": >-
@@ -30,8 +31,8 @@
     - name: Warn when Git identity is not configured
       ansible.builtin.debug:
         msg: >-
-          features.configure_git is true but user.name or user.email is empty, so Git
-          configuration is skipped. Set them in vars/local.yml (see vars/local.example.yml).
+          features.configure_git is true but user.name or user.email is empty, so the Git
+          identity (user.name/user.email) is skipped. Set them in vars/local.yml (see vars/local.example.yml).
       when:
         - features.configure_git
         - (user.name | default('') | length == 0) or (user.email | default('') | length == 0)

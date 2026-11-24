@@ -7,6 +7,10 @@
 # takes precedence over group_vars/all.yml. Any top-level key from
 # group_vars/all.yml can be overridden here. Dicts are merged recursively, so
 # list only the keys you want to change; lists are replaced as a whole.
+#
+# Write values out literally. Values here can't reference other keys from this
+# file (e.g. "{{ user.github_username }}"), because those resolve to the
+# group_vars defaults, not to the overrides.
 
 user:
   name: "Jane Doe"
