@@ -34,10 +34,39 @@
         type: "{{ item.type }}"
         value: "{{ item.value }}"
       loop:
-        - { key: 'autohide', type: 'bool', value: "{{ macos_settings.dock.autohide }}" }
-        - { key: 'tilesize', type: 'float', value: "{{ macos_settings.dock.tilesize }}" }
-        - { key: 'show-recents', type: 'bool', value: "{{ macos_settings.dock.show_recents }}" }
+        - key: autohide
+          type: bool
+          value: "{{ macos_settings.dock.autohide }}"
+        - key: tilesize
+          type: float
+          value: "{{ macos_settings.dock.tilesize }}"
+        - key: show-recents
+          type: bool
+          value: "{{ macos_settings.dock.show_recents }}"
       notify: Restart Dock
+
+    - name: Configure MacOS Finder
+      community.general.osx_defaults:
+        domain: "{{ item.domain }}"
+        key: "{{ item.key }}"
+        type: "{{ item.type }}"
+        value: "{{ item.value }}"
+      loop:
+        - domain: NSGlobalDomain
+          key: AppleShowAllExtensions
+          type: bool
+          value: "{{ macos_settings.finder.show_all_extensions }}"
+        # FXPreferredViewStyle only applies to folders without a saved view
+        # (.DS_Store); folders you have already opened keep their own view.
+        - domain: com.apple.finder
+          key: FXPreferredViewStyle
+          type: string
+          value: "{{ macos_settings.finder.default_view_style }}"
+        - domain: com.apple.finder
+          key: ShowPathbar
+          type: bool
+          value: "{{ macos_settings.finder.show_path_bar }}"
+      notify: Restart Finder
 
     - name: Configure Git Global User
       community.general.git_config:
@@ -100,5 +129,17 @@
         executable: /bin/zsh
 
   handlers:
+    # killall exits 1 when no matching process is running. That is fine here:
+    # the next launch of Dock/Finder reads the new defaults anyway, so only
+    # other exit codes (e.g. bad usage) are treated as failures.
     - name: Restart Dock
-      ansible.builtin.shell: killall Dock
+      ansible.builtin.command: killall Dock
+      register: restart_dock
+      changed_when: true
+      failed_when: restart_dock.rc not in [0, 1]
+
+    - name: Restart Finder
+      ansible.builtin.command: killall Finder
+      register: restart_finder
+      changed_when: true
+      failed_when: restart_finder.rc not in [0, 1]
