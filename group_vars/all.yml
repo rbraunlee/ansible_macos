@@ -3,7 +3,11 @@ user:
   email: braun.ru@outlook.de
   github_username: braunrudolf
 
-brew_bin: "/opt/homebrew/bin/brew"
+# Homebrew's default prefix: /opt/homebrew on Apple Silicon, /usr/local on Intel.
+brew_prefix: "{{ '/opt/homebrew' if ansible_facts['architecture'] == 'arm64' else '/usr/local' }}"
+brew_bin: "{{ brew_prefix }}/bin/brew"
+# Run `brew update` before installing formulae. Off by default so re-runs stay fast.
+update_homebrew: false
 
 setup_brew:
   formulae:
