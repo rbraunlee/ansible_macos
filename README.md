@@ -28,7 +28,7 @@ cd ~/ansible_macos
 bash bootstrap.sh
 ```
 
-Run it from the repository root. It calls `main.yml` by relative path, and the file isn't marked executable yet ([#11](https://github.com/rbraunlee/ansible_macos/issues/11)).
+Run it from the repository root. It calls `main.yml` by relative path, and `bootstrap.sh` isn't marked executable yet ([#11](https://github.com/rbraunlee/ansible_macos/issues/11)).
 
 The script will:
 
