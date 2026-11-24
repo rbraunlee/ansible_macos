@@ -87,17 +87,60 @@
       environment:
         PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['HOME'] }}"
 
-    - name: Download Zap installer
-      ansible.builtin.get_url:
-        url: https://raw.githubusercontent.com/zap-zsh/zap/master/install.zsh
-        dest: /tmp/zap_install.zsh
-        mode: '0755'
+    - name: Check whether Zap is already installed
+      ansible.builtin.stat:
+        path: "{{ ansible_facts['env']['HOME'] }}/.local/share/zap"
+      register: zap_dir
+      when: features.install_zap
 
-    - name: Execute Zap installer
-      ansible.builtin.shell:
-        cmd: "/tmp/zap_install.zsh --branch release-v1 --keep"
-        creates: "~/.local/share/zap"
-        executable: /bin/zsh
+    - name: Install Zap
+      when:
+        - features.install_zap
+        - not zap_dir.stat.exists
+      vars:
+        # The installer script is pinned to an exact zap-zsh/zap commit and verified by checksum.
+        # To bump: pick a tag from https://github.com/zap-zsh/zap/tags, set zap_installer_ref to
+        # its commit SHA, then set zap_installer_sha256 to the output of:
+        #   curl -fsSL https://raw.githubusercontent.com/zap-zsh/zap/<sha>/install.zsh | sha256sum
+        zap_installer_ref: d8e74d3d97ded884d14079f98f0a328580e4f8dc  # tag 1.2.3
+        zap_installer_sha256: f73fe83a252da7c0a67d18ebe42e6c54d34f1d8b4438a891c0f6453417814579
+        # Branch of zap-zsh/zap that the installer clones (upstream's stable release branch).
+        zap_branch: release-v1
+      block:
+        - name: Create private temporary directory for Zap installer
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: zap_install.
+          register: zap_tmp
+
+        - name: Download Zap installer
+          ansible.builtin.get_url:
+            url: "https://raw.githubusercontent.com/zap-zsh/zap/{{ zap_installer_ref }}/install.zsh"
+            dest: "{{ zap_tmp.path }}/install.zsh"
+            checksum: "sha256:{{ zap_installer_sha256 }}"
+            mode: '0700'
+
+        - name: Execute Zap installer
+          ansible.builtin.command:
+            argv:
+              - /bin/zsh
+              - "{{ zap_tmp.path }}/install.zsh"
+              - --branch
+              - "{{ zap_branch }}"
+              - --keep
+            creates: "~/.local/share/zap"
+          register: zap_install
+          # After installing, the script runs `source ~/.zshrc`, which fails (rc 127) when there is
+          # no ~/.zshrc or when it can't be sourced non-interactively. Zap is installed at that point,
+          # so treat "Zapped" in the output as success.
+          failed_when: zap_install.rc != 0 and 'Zapped' not in zap_install.stdout
+
+      always:
+        - name: Remove Zap installer temporary directory
+          ansible.builtin.file:
+            path: "{{ zap_tmp.path }}"
+            state: absent
+          when: zap_tmp.path is defined
 
   handlers:
     - name: Restart Dock
