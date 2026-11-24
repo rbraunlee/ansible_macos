@@ -1,9 +1,16 @@
+---
+# Generic defaults. Put personal values (name, email, dotfiles repo, ...) in the
+# untracked vars/local.yml; see vars/local.example.yml.
 user:
-  name: Rudolf Braun-Lee
-  email: braun.ru@outlook.de
-  github_username: braunrudolf
+  name: ""
+  email: ""
+  github_username: ""
 
-brew_bin: "/opt/homebrew/bin/brew"
+# Homebrew's default prefix: /opt/homebrew on Apple Silicon, /usr/local on Intel.
+brew_prefix: "{{ '/opt/homebrew' if ansible_facts['architecture'] == 'arm64' else '/usr/local' }}"
+brew_bin: "{{ brew_prefix }}/bin/brew"
+# Run `brew update` before installing formulae. Off by default so re-runs stay fast.
+update_homebrew: false
 
 setup_brew:
   formulae:
@@ -41,16 +48,18 @@ macos_settings:
     show_recents: false
   finder:
     show_all_extensions: true
-    default_view_style: "clmv" # Column view
+    default_view_style: "clmv"  # icnv=Icon, Nlsv=List, clmv=Column, glyv=Gallery
     show_path_bar: true
 
 dotfiles:
   repo: "https://github.com/BraunRudolf/.dotfiles.git"
   dest: "{{ ansible_facts['env']['HOME'] }}/.dotfiles"
+  # Branch, tag or commit checked out by the first clone. Ignored once the clone exists.
+  version: main
   subdirs:
     - common
     - macos
   config_destination: "{{ ansible_facts['env']['HOME'] }}/.config"
 features:
-  install_oh_my_zsh: true
+  install_zap: true
   configure_git: true

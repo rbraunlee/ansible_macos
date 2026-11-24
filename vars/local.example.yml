@@ -1,0 +1,22 @@
+---
+# Personal overrides for this playbook.
+#
+#   cp vars/local.example.yml vars/local.yml
+#
+# vars/local.yml is git-ignored. It is loaded in pre_tasks when present and
+# takes precedence over group_vars/all.yml. Any top-level key from
+# group_vars/all.yml can be overridden here. Dicts are merged recursively, so
+# list only the keys you want to change; lists are replaced as a whole.
+#
+# Write values out literally. Values here can't reference other keys from this
+# file (e.g. "{{ user.github_username }}"), because those resolve to the
+# group_vars defaults, not to the overrides.
+
+user:
+  name: "Jane Doe"
+  email: "jane@example.com"
+  # Optional. When set, the playbook runs `git config --global github.user`.
+  github_username: "janedoe"
+
+dotfiles:
+  repo: "https://github.com/janedoe/dotfiles.git"

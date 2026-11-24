@@ -3,29 +3,75 @@
   hosts: localhost
   connection: local
 
+  pre_tasks:
+    - name: Check for untracked local overrides
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/vars/local.yml"
+      register: local_vars_file
+
+    - name: Load local overrides from vars/local.yml
+      ansible.builtin.include_vars:
+        file: "{{ local_vars_file.stat.path }}"
+        name: local_vars
+      when: local_vars_file.stat.exists
+
+    # Each top-level key in vars/local.yml overrides the group_vars value.
+    # Dicts are merged recursively, so local.yml only needs the keys it changes.
+    # These are set_facts, so they also win over task/block-level `vars:` for the same keys.
+    - name: Apply local overrides on top of group_vars
+      ansible.builtin.set_fact:
+        "{{ item.key }}": >-
+          {{ lookup('ansible.builtin.vars', item.key, default={})
+             | ansible.builtin.combine(item.value, recursive=True)
+             if item.value is mapping else item.value }}
+      loop: "{{ local_vars | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Warn when Git identity is not configured
+      ansible.builtin.debug:
+        msg: >-
+          features.configure_git is true but user.name or user.email is empty, so the Git
+          identity (user.name/user.email) is skipped. Set them in vars/local.yml (see vars/local.example.yml).
+      when:
+        - features.configure_git
+        - (user.name | default('') | length == 0) or (user.email | default('') | length == 0)
+
   tasks:
     - name: Ensure Homebrew is installed
       ansible.builtin.stat:
         path: "{{ brew_bin }}"
       register: brew_check
 
-    - name: Install Homebrew if missing
-      ansible.builtin.shell: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-      when: not brew_check.stat.exists
+    # bootstrap.sh installs Homebrew from a real terminal, where the installer can prompt for sudo.
+    # Under Ansible there is no TTY, so the installer would need passwordless sudo: fail early instead.
+    - name: Fail early if Homebrew is missing
+      ansible.builtin.assert:
+        that: brew_check.stat.exists
+        fail_msg: >-
+          Homebrew was not found at {{ brew_bin }} (architecture: {{ ansible_facts['architecture'] }}).
+          Run ./bootstrap.sh first: it installs Homebrew and Ansible, then runs this playbook.
+        quiet: true
 
     - name: Install Homebrew formulae
       community.general.homebrew:
         name: "{{ setup_brew.formulae }}"
         state: present
-        update_homebrew: yes
+        path: "{{ brew_bin | dirname }}"
+        update_homebrew: "{{ update_homebrew }}"
       environment:
-        PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['PATH'] }}"
+        PATH: "{{ brew_bin | dirname }}:{{ ansible_facts['env']['PATH'] }}"
 
+    # Casks that ship .pkg installers run sudo inside brew. The module hands sudo_password to sudo
+    # through SUDO_ASKPASS and masks it in output (no_log is set in the module's own argspec).
     - name: Install Homebrew casks
       community.general.homebrew_cask:
         name: "{{ setup_brew.cask }}"
         state: present
-        install_options: "no-quarantine"
+        path: "{{ brew_bin | dirname }}"
+        sudo_password: "{{ ansible_become_password | default(ansible_become_pass | default(omit)) }}"
+      environment:
+        PATH: "{{ brew_bin | dirname }}:{{ ansible_facts['env']['PATH'] }}"
 
     - name: Configure MacOS Dock
       community.general.osx_defaults:
@@ -34,32 +80,80 @@
         type: "{{ item.type }}"
         value: "{{ item.value }}"
       loop:
-        - { key: 'autohide', type: 'bool', value: "{{ macos_settings.dock.autohide }}" }
-        - { key: 'tilesize', type: 'float', value: "{{ macos_settings.dock.tilesize }}" }
-        - { key: 'show-recents', type: 'bool', value: "{{ macos_settings.dock.show_recents }}" }
+        - key: autohide
+          type: bool
+          value: "{{ macos_settings.dock.autohide }}"
+        - key: tilesize
+          type: float
+          value: "{{ macos_settings.dock.tilesize }}"
+        - key: show-recents
+          type: bool
+          value: "{{ macos_settings.dock.show_recents }}"
       notify: Restart Dock
+
+    - name: Configure MacOS Finder
+      community.general.osx_defaults:
+        domain: "{{ item.domain }}"
+        key: "{{ item.key }}"
+        type: "{{ item.type }}"
+        value: "{{ item.value }}"
+      loop:
+        - domain: NSGlobalDomain
+          key: AppleShowAllExtensions
+          type: bool
+          value: "{{ macos_settings.finder.show_all_extensions }}"
+        # FXPreferredViewStyle only applies to folders without a saved view
+        # (.DS_Store); folders you have already opened keep their own view.
+        - domain: com.apple.finder
+          key: FXPreferredViewStyle
+          type: string
+          value: "{{ macos_settings.finder.default_view_style }}"
+        - domain: com.apple.finder
+          key: ShowPathbar
+          type: bool
+          value: "{{ macos_settings.finder.show_path_bar }}"
+      notify: Restart Finder
 
     - name: Configure Git Global User
       community.general.git_config:
         name: user.name
         scope: global
         value: "{{ user.name }}"
-      when: features.configure_git
+      when:
+        - features.configure_git
+        - user.name | default('') | length > 0
+        - user.email | default('') | length > 0
 
     - name: Configure Git Global Email
       community.general.git_config:
         name: user.email
         scope: global
         value: "{{ user.email }}"
-      when: features.configure_git
+      when:
+        - features.configure_git
+        - user.name | default('') | length > 0
+        - user.email | default('') | length > 0
 
+    - name: Configure Git GitHub username
+      community.general.git_config:
+        name: github.user
+        scope: global
+        value: "{{ user.github_username }}"
+      when:
+        - features.configure_git
+        - user.github_username | default('') | length > 0
+
+    # Clone only when missing. Stowed files are edited in place, so the clone is
+    # often dirty or ahead of the remote, and an update would then fail. (Without
+    # a pinned `version`, the module would even `reset --hard` and drop local
+    # commits.) Run `git pull` yourself.
     - name: Clone dotfiles repository
       ansible.builtin.git:
         repo: "{{ dotfiles.repo }}"
         dest: "{{ dotfiles.dest }}"
-        recursive: yes
-        update: yes
-        accept_hostkey: yes
+        version: "{{ dotfiles.version }}"
+        recursive: true
+        update: false
 
     - name: Ensure .config directory exists
       ansible.builtin.file:
@@ -71,34 +165,107 @@
       ansible.builtin.find:
         paths: "{{ dotfiles.dest }}/{{ item }}"
         file_type: directory
-        recurse: no
+        recurse: false
       loop: "{{ dotfiles.subdirs }}"
       register: found_dotfiles
 
+    # -S rather than -R: packages that are already stowed print nothing and stay
+    # "ok". With -v, stow logs each action to stderr as "LINK: ..." or "UNLINK: ...".
+    # Trade-off: -S does not remove links to files deleted from a package; run
+    # `stow -R -d <dotfiles>/<subdir> -t ~ <pkg>` by hand for that.
     - name: Symlink dotfiles using Stow
-      ansible.builtin.shell:
-        cmd: "stow -R -v -d {{ dotfiles.dest }}/{{ item.0.item }} -t {{ ansible_facts['env']['HOME'] }} {{ item.1.path | basename }}"
+      ansible.builtin.command:
+        argv:
+          - stow
+          - -S
+          - -v
+          - -d
+          - "{{ dotfiles.dest }}/{{ item.0.item }}"
+          - -t
+          - "{{ ansible_facts['env']['HOME'] }}"
+          - "{{ item.1.path | basename }}"
       loop: "{{ found_dotfiles.results | subelements('files', skip_missing=True) }}"
+      loop_control:
+        label: "{{ item.0.item }}/{{ item.1.path | basename }}"
       register: stow_out
-      changed_when:
-        - "'LINK' in stow_out.stderr"
-        - "'UNLINK' in stow_out.stderr"
+      changed_when: "stow_out.stderr is search('^(LINK|UNLINK): ', multiline=True)"
       failed_when: stow_out.rc != 0
       environment:
-        PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['HOME'] }}"
+        PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['PATH'] }}"
 
-    - name: Download Zap installer
-      ansible.builtin.get_url:
-        url: https://raw.githubusercontent.com/zap-zsh/zap/master/install.zsh
-        dest: /tmp/zap_install.zsh
-        mode: '0755'
+    - name: Check whether Zap is already installed
+      ansible.builtin.stat:
+        path: "{{ ansible_facts['env']['HOME'] }}/.local/share/zap"
+      register: zap_dir
+      when: features.install_zap
 
-    - name: Execute Zap installer
-      ansible.builtin.shell:
-        cmd: "/tmp/zap_install.zsh --branch release-v1 --keep"
-        creates: "~/.local/share/zap"
-        executable: /bin/zsh
+    - name: Install Zap
+      when:
+        - features.install_zap
+        - not zap_dir.stat.exists
+      vars:
+        # The installer script is pinned to an exact zap-zsh/zap commit and verified by checksum.
+        # To bump: pick a tag from https://github.com/zap-zsh/zap/tags, set zap_installer_ref to
+        # its commit SHA, then set zap_installer_sha256 to the output of:
+        #   curl -fsSL https://raw.githubusercontent.com/zap-zsh/zap/<sha>/install.zsh | sha256sum
+        zap_installer_ref: d8e74d3d97ded884d14079f98f0a328580e4f8dc  # tag 1.2.3
+        zap_installer_sha256: f73fe83a252da7c0a67d18ebe42e6c54d34f1d8b4438a891c0f6453417814579
+        # Branch of zap-zsh/zap that the installer clones (upstream's stable release branch).
+        # Only the installer script is pinned; the installed Zap code follows this branch's head.
+        zap_branch: release-v1
+      block:
+        - name: Create private temporary directory for Zap installer
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: zap_install.
+          register: zap_tmp
+          # tempfile has no check-mode support; without this, --check fails on the next task.
+          check_mode: false
+
+        - name: Download Zap installer
+          ansible.builtin.get_url:
+            url: "https://raw.githubusercontent.com/zap-zsh/zap/{{ zap_installer_ref }}/install.zsh"
+            dest: "{{ zap_tmp.path }}/install.zsh"
+            checksum: "sha256:{{ zap_installer_sha256 }}"
+            mode: '0700'
+
+        - name: Execute Zap installer
+          ansible.builtin.command:
+            argv:
+              - /bin/zsh
+              - "{{ zap_tmp.path }}/install.zsh"
+              - --branch
+              - "{{ zap_branch }}"
+              - --keep
+            creates: "~/.local/share/zap"
+          register: zap_install
+          # After installing, the script runs `source ~/.zshrc`, which fails (rc 127) when there is
+          # no ~/.zshrc or when it can't be sourced non-interactively. Zap is installed at that point,
+          # so treat "Zapped" in the output as success. This intentionally also passes when an
+          # existing ~/.zshrc errors on source; that is a dotfiles problem, not an install failure.
+          failed_when: zap_install.rc != 0 and 'Zapped' not in zap_install.stdout
+
+      always:
+        - name: Remove Zap installer temporary directory
+          ansible.builtin.file:
+            path: "{{ zap_tmp.path }}"
+            state: absent
+          when: zap_tmp.path is defined
+          # Also runs for real under --check, so the temp dir created above is not left behind.
+          check_mode: false
 
   handlers:
+    # killall exits 1 when no matching process is running. That is fine here:
+    # the next launch of Dock/Finder reads the new defaults anyway, so only
+    # other exit codes (e.g. bad usage) are treated as failures.
     - name: Restart Dock
-      ansible.builtin.shell: killall Dock
+      ansible.builtin.command: killall Dock
+      register: restart_dock
+      changed_when: true
+      failed_when: restart_dock.rc not in [0, 1]
+
+    - name: Restart Finder
+      ansible.builtin.command: killall Finder
+      register: restart_finder
+      changed_when: true
+      failed_when: restart_finder.rc not in [0, 1]
