@@ -131,13 +131,17 @@
         - features.configure_git
         - user.github_username | default('') | length > 0
 
+    # Clone only when missing. Stowed files are edited in place, so the clone is
+    # often dirty or ahead of the remote, and an update would then fail. (Without
+    # a pinned `version`, the module would even `reset --hard` and drop local
+    # commits.) Run `git pull` yourself.
     - name: Clone dotfiles repository
       ansible.builtin.git:
         repo: "{{ dotfiles.repo }}"
         dest: "{{ dotfiles.dest }}"
-        recursive: yes
-        update: yes
-        accept_hostkey: yes
+        version: "{{ dotfiles.version }}"
+        recursive: true
+        update: false
 
     - name: Ensure .config directory exists
       ansible.builtin.file:
@@ -149,21 +153,33 @@
       ansible.builtin.find:
         paths: "{{ dotfiles.dest }}/{{ item }}"
         file_type: directory
-        recurse: no
+        recurse: false
       loop: "{{ dotfiles.subdirs }}"
       register: found_dotfiles
 
+    # -S rather than -R: packages that are already stowed print nothing and stay
+    # "ok". With -v, stow logs each action to stderr as "LINK: ..." or "UNLINK: ...".
+    # Trade-off: -S does not remove links to files deleted from a package; run
+    # `stow -R -d <dotfiles>/<subdir> -t ~ <pkg>` by hand for that.
     - name: Symlink dotfiles using Stow
-      ansible.builtin.shell:
-        cmd: "stow -R -v -d {{ dotfiles.dest }}/{{ item.0.item }} -t {{ ansible_facts['env']['HOME'] }} {{ item.1.path | basename }}"
+      ansible.builtin.command:
+        argv:
+          - stow
+          - -S
+          - -v
+          - -d
+          - "{{ dotfiles.dest }}/{{ item.0.item }}"
+          - -t
+          - "{{ ansible_facts['env']['HOME'] }}"
+          - "{{ item.1.path | basename }}"
       loop: "{{ found_dotfiles.results | subelements('files', skip_missing=True) }}"
+      loop_control:
+        label: "{{ item.0.item }}/{{ item.1.path | basename }}"
       register: stow_out
-      changed_when:
-        - "'LINK' in stow_out.stderr"
-        - "'UNLINK' in stow_out.stderr"
+      changed_when: "stow_out.stderr is search('^(LINK|UNLINK): ', multiline=True)"
       failed_when: stow_out.rc != 0
       environment:
-        PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['HOME'] }}"
+        PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['PATH'] }}"
 
     - name: Check whether Zap is already installed
       ansible.builtin.stat:

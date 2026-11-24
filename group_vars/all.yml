@@ -50,6 +50,8 @@ macos_settings:
 dotfiles:
   repo: "https://github.com/BraunRudolf/.dotfiles.git"
   dest: "{{ ansible_facts['env']['HOME'] }}/.dotfiles"
+  # Branch, tag or commit checked out by the first clone. Ignored once the clone exists.
+  version: main
   subdirs:
     - common
     - macos
