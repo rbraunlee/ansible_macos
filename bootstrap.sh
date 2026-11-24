@@ -28,7 +28,7 @@ cd -- "$SCRIPT_DIR"
 # How long to wait for the Xcode CLT installer when there is no terminal to
 # prompt on (seconds).
 XCODE_CLT_TIMEOUT="${XCODE_CLT_TIMEOUT:-1800}"
-[[ "$XCODE_CLT_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "[ERROR] XCODE_CLT_TIMEOUT must be a number of seconds." >&2; exit 1; }
+[[ "$XCODE_CLT_TIMEOUT" =~ ^(0|[1-9][0-9]*)$ ]] || { echo "[ERROR] XCODE_CLT_TIMEOUT must be a number of seconds." >&2; exit 1; }
 
 die() {
     echo "[ERROR] $*" >&2
