@@ -41,7 +41,7 @@ macos_settings:
     show_recents: false
   finder:
     show_all_extensions: true
-    default_view_style: "clmv" # Column view
+    default_view_style: "clmv"  # icnv=Icon, Nlsv=List, clmv=Column, glyv=Gallery
     show_path_bar: true
 
 dotfiles:
