@@ -5,20 +5,22 @@ Bootstrap a new macOS machine with Homebrew, Ansible, and a dotfiles repository.
 A single script (`bootstrap.sh`) prepares the machine and runs an Ansible playbook (`main.yml`) that:
 
 - installs Homebrew formulae and casks
-- sets Dock and Finder preferences
+- sets Dock preferences (Finder settings are defined but not yet applied, see [#8](https://github.com/rbraunlee/ansible_macos/issues/8))
 - configures the global Git user name and email
 - clones the dotfiles repository and symlinks it into `$HOME` with GNU Stow
 - installs the Zap zsh plugin manager
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
-- An administrator account (the playbook asks for the sudo password)
+- macOS on Apple Silicon. `bootstrap.sh` handles Intel, but the playbook doesn't yet ([#6](https://github.com/rbraunlee/ansible_macos/issues/6)).
+- An administrator account. The playbook asks for the sudo password, but no task uses it yet ([#7](https://github.com/rbraunlee/ansible_macos/issues/7)).
 - Internet access (Homebrew, Galaxy, GitHub)
 
 `bootstrap.sh` installs everything else it needs: Xcode Command Line Tools, Homebrew, Ansible, and the `community.general` collection.
 
 ## Usage
+
+On a fresh Mac, the first `git` command prompts you to install the Xcode Command Line Tools. Accept the prompt, then clone:
 
 ```bash
 git clone <this-repo-url> ~/ansible_macos
@@ -59,7 +61,8 @@ Edit `group_vars/all.yml` to change what gets installed or configured.
 | Key | Description |
 | --- | --- |
 | `user.name`, `user.email` | Written to the global Git config when `features.configure_git` is `true`. |
-| `brew_bin` | Path to the `brew` binary used by the playbook. |
+| `user.github_username` | **Defined but not yet used.** |
+| `brew_bin` | Path the playbook checks to decide whether Homebrew is installed. |
 | `setup_brew.formulae` | Command-line packages installed with `brew`. |
 | `setup_brew.cask` | GUI applications and fonts installed with `brew install --cask`. Installed with `no-quarantine`. |
 | `macos_settings.dock` | Dock autohide, tile size, and show-recents. |
@@ -76,7 +79,7 @@ The playbook expects the dotfiles repository to contain one directory per applic
 
 ## Idempotency
 
-The playbook is designed to be re-run. Homebrew packages and casks are only installed when missing, `osx_defaults` and `git_config` only change values that differ, and the dotfiles repo is updated in place. Stow is run with `-R` (restow), so existing links are refreshed. Re-runs currently fail if the dotfiles clone has uncommitted changes ([#3](https://github.com/rbraunlee/ansible_macos/issues/3)).
+The playbook is designed to be re-run. Homebrew packages and casks are only installed when missing (but `brew update` runs every time, which slows re-runs), `osx_defaults` and `git_config` only change values that differ, and the dotfiles repo is updated in place. Stow is run with `-R` (restow), so existing links are refreshed. Re-runs currently fail if the dotfiles clone has uncommitted changes ([#3](https://github.com/rbraunlee/ansible_macos/issues/3)).
 
 ## Known issues
 
