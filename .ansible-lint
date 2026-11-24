@@ -1,0 +1,13 @@
+---
+# ansible-lint configuration. See https://ansible.readthedocs.io/projects/lint/configuring/
+profile: basic
+
+# Do not reach out to Ansible Galaxy; collections are installed beforehand
+# (locally via bootstrap.sh, in CI via the lint workflow).
+offline: true
+
+exclude_paths:
+  - .git/
+  - .github/
+  - .venv/
+  - .ansible/
