@@ -2,6 +2,11 @@
 - name: Setup macOS Environment
   hosts: localhost
   connection: local
+  # bootstrap.sh passes the sudo password to ansible-playbook in BOOTSTRAP_BECOME_PASS, which the
+  # ansible_become_password lookup reads on the controller. Blank it for every module and child
+  # process, so it stays out of ansible_facts.env and the environment of brew, git, stow, etc.
+  environment:
+    BOOTSTRAP_BECOME_PASS: ""
 
   pre_tasks:
     - name: Check for untracked local overrides
@@ -24,7 +29,8 @@
           {{ lookup('ansible.builtin.vars', item.key, default={})
              | ansible.builtin.combine(item.value, recursive=True)
              if item.value is mapping else item.value }}
-      loop: "{{ local_vars | default({}) | dict2items }}"
+      # Keys left empty at the top level (e.g. a bare `dotfiles:`) are ignored instead of wiping the default.
+      loop: "{{ local_vars | default({}) | dict2items | rejectattr('value', 'none') }}"
       loop_control:
         label: "{{ item.key }}"
 
@@ -35,7 +41,14 @@
           identity (user.name/user.email) is skipped. Set them in vars/local.yml (see vars/local.example.yml).
       when:
         - features.configure_git
-        - (user.name | default('') | length == 0) or (user.email | default('') | length == 0)
+        - (user.name | default('', true) | length == 0) or (user.email | default('', true) | length == 0)
+
+    - name: Warn when no dotfiles repo is configured
+      ansible.builtin.debug:
+        msg: >-
+          dotfiles.repo is empty, so cloning and stowing dotfiles is skipped.
+          Set it in vars/local.yml (see vars/local.example.yml).
+      when: dotfiles.repo | default('', true) | length == 0
 
   tasks:
     - name: Ensure Homebrew is installed
@@ -121,8 +134,8 @@
         value: "{{ user.name }}"
       when:
         - features.configure_git
-        - user.name | default('') | length > 0
-        - user.email | default('') | length > 0
+        - user.name | default('', true) | length > 0
+        - user.email | default('', true) | length > 0
 
     - name: Configure Git Global Email
       community.general.git_config:
@@ -131,8 +144,8 @@
         value: "{{ user.email }}"
       when:
         - features.configure_git
-        - user.name | default('') | length > 0
-        - user.email | default('') | length > 0
+        - user.name | default('', true) | length > 0
+        - user.email | default('', true) | length > 0
 
     - name: Configure Git GitHub username
       community.general.git_config:
@@ -141,19 +154,7 @@
         value: "{{ user.github_username }}"
       when:
         - features.configure_git
-        - user.github_username | default('') | length > 0
-
-    # Clone only when missing. Stowed files are edited in place, so the clone is
-    # often dirty or ahead of the remote, and an update would then fail. (Without
-    # a pinned `version`, the module would even `reset --hard` and drop local
-    # commits.) Run `git pull` yourself.
-    - name: Clone dotfiles repository
-      ansible.builtin.git:
-        repo: "{{ dotfiles.repo }}"
-        dest: "{{ dotfiles.dest }}"
-        version: "{{ dotfiles.version }}"
-        recursive: true
-        update: false
+        - user.github_username | default('', true) | length > 0
 
     - name: Ensure .config directory exists
       ansible.builtin.file:
@@ -161,37 +162,52 @@
         state: directory
         mode: '0755'
 
-    - name: Find all app folders in dotfiles subdirs
-      ansible.builtin.find:
-        paths: "{{ dotfiles.dest }}/{{ item }}"
-        file_type: directory
-        recurse: false
-      loop: "{{ dotfiles.subdirs }}"
-      register: found_dotfiles
+    - name: Clone and stow dotfiles
+      when: dotfiles.repo | default('', true) | length > 0
+      block:
+        # Clone only when missing. Stowed files are edited in place, so the clone is
+        # often dirty or ahead of the remote, and an update would then fail. (Without
+        # a pinned `version`, the module would even `reset --hard` and drop local
+        # commits.) Run `git pull` yourself.
+        - name: Clone dotfiles repository
+          ansible.builtin.git:
+            repo: "{{ dotfiles.repo }}"
+            dest: "{{ dotfiles.dest }}"
+            version: "{{ dotfiles.version }}"
+            recursive: true
+            update: false
 
-    # -S rather than -R: packages that are already stowed print nothing and stay
-    # "ok". With -v, stow logs each action to stderr as "LINK: ..." or "UNLINK: ...".
-    # Trade-off: -S does not remove links to files deleted from a package; run
-    # `stow -R -d <dotfiles>/<subdir> -t ~ <pkg>` by hand for that.
-    - name: Symlink dotfiles using Stow
-      ansible.builtin.command:
-        argv:
-          - stow
-          - -S
-          - -v
-          - -d
-          - "{{ dotfiles.dest }}/{{ item.0.item }}"
-          - -t
-          - "{{ ansible_facts['env']['HOME'] }}"
-          - "{{ item.1.path | basename }}"
-      loop: "{{ found_dotfiles.results | subelements('files', skip_missing=True) }}"
-      loop_control:
-        label: "{{ item.0.item }}/{{ item.1.path | basename }}"
-      register: stow_out
-      changed_when: "stow_out.stderr is search('^(LINK|UNLINK): ', multiline=True)"
-      failed_when: stow_out.rc != 0
-      environment:
-        PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_facts['env']['PATH'] }}"
+        - name: Find all app folders in dotfiles subdirs
+          ansible.builtin.find:
+            paths: "{{ dotfiles.dest }}/{{ item }}"
+            file_type: directory
+            recurse: false
+          loop: "{{ dotfiles.subdirs }}"
+          register: found_dotfiles
+
+        # -S rather than -R: packages that are already stowed print nothing and stay
+        # "ok". With -v, stow logs each action to stderr as "LINK: ..." or "UNLINK: ...".
+        # Trade-off: -S does not remove links to files deleted from a package; run
+        # `stow -R -d <dotfiles>/<subdir> -t ~ <pkg>` by hand for that.
+        - name: Symlink dotfiles using Stow
+          ansible.builtin.command:
+            argv:
+              - stow
+              - -S
+              - -v
+              - -d
+              - "{{ dotfiles.dest }}/{{ item.0.item }}"
+              - -t
+              - "{{ ansible_facts['env']['HOME'] }}"
+              - "{{ item.1.path | basename }}"
+          loop: "{{ found_dotfiles.results | subelements('files', skip_missing=True) }}"
+          loop_control:
+            label: "{{ item.0.item }}/{{ item.1.path | basename }}"
+          register: stow_out
+          changed_when: "stow_out.stderr is search('^(LINK|UNLINK): ', multiline=True)"
+          failed_when: stow_out.rc != 0
+          environment:
+            PATH: "{{ brew_bin | dirname }}:{{ ansible_facts['env']['PATH'] }}"
 
     - name: Check whether Zap is already installed
       ansible.builtin.stat:

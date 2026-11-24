@@ -52,7 +52,9 @@ macos_settings:
     show_path_bar: true
 
 dotfiles:
-  repo: "https://github.com/BraunRudolf/.dotfiles.git"
+  # Git URL of your dotfiles repo. Set it in vars/local.yml; the dotfiles steps are
+  # skipped while it is empty.
+  repo: ""
   dest: "{{ ansible_facts['env']['HOME'] }}/.dotfiles"
   # Branch, tag or commit checked out by the first clone. Ignored once the clone exists.
   version: main
