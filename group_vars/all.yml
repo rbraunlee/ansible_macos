@@ -55,5 +55,5 @@ dotfiles:
     - macos
   config_destination: "{{ ansible_facts['env']['HOME'] }}/.config"
 features:
-  install_oh_my_zsh: true
+  install_zap: true
   configure_git: true
